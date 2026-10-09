@@ -67,8 +67,7 @@ Conv 128, kernel 3 + BatchNorm + ReLU + MaxPool 2	128 × 25
 Global average pooling → Linear	3 classes
 
 32,195 parameters, dropout 0.2, Adam (learning rate 0.001), early stopping on validation loss. Kept small on purpose to fit on a chip.
-
-<!-- fig3_cnn_confusion: delete this line and drag fig3_cnn_confusion.png here --> <img width="600" height="400" alt="fig10_cnn_loss_curve" src="https://github.com/user-attachments/assets/4b493577-6584-4651-92ed-4b7afbcbd833" />
+<img width="600" height="400" alt="fig10_cnn_loss_curve" src="https://github.com/user-attachments/assets/4b493577-6584-4651-92ed-4b7afbcbd833" />
 
 Example validation run (train Car 1, validate Car 2): validation loss is lowest at epoch 2 and then rises while training loss keeps falling, so early stopping matters when the validation car is different from the training car.
 
