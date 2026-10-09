@@ -1,11 +1,3 @@
-"""
-Explore the 7 channels BEFORE training the CNN.
-  Plot 1: average spectrum (Welch) per channel x surface, one line per car
-          -> do surfaces look different? does each surface look the same in every car?
-  Plot 2: quick test per channel: band energies -> random forest, leave-one-car-out
-          -> which channels separate the surfaces on an UNSEEN car?
-Input: windows_v2.npz from preprocess_v2.py
-"""
 import os
 import numpy as np
 import pandas as pd
@@ -14,15 +6,14 @@ from scipy.signal import welch
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import f1_score
 
-BASE = "data"                     # PVS folders and all outputs live here; run scripts from the repo root
+BASE = "data"                     
 DATA_FILE = os.path.join(BASE, "windows_v2.npz")
 OUT_DIR = os.path.join(BASE, "exploration")
 FS = 100
 CARS = [1, 2, 3]
 NAMES = ["dirt", "cobblestone", "asphalt"]
 CAR_COLORS = {1: "#BA7517", 2: "#534AB7", 3: "#1D9E75"}
-BANDS = [0.5, 2, 4, 8, 12, 16, 24, 32, 50]          # Hz edges -> 8 bands
-
+BANDS = [0.5, 2, 4, 8, 12, 16, 24, 32, 50]         
 os.makedirs(OUT_DIR, exist_ok=True)
 d = np.load(DATA_FILE)
 X, y, car = d["X"], d["y"], d["car"]
@@ -30,11 +21,10 @@ channels = [str(c) for c in d["channels"]]
 short = [c.replace("_below_suspension", "") for c in channels]
 print(f"X: {X.shape}  channels: {short}")
 
-# spectrum of every window, every channel: (windows, channels, freqs)
+
 freqs, psd = welch(X, fs=FS, nperseg=64, axis=-1)
 psd_db = 10 * np.log10(psd + 1e-12)
 
-# ---------------- plot 1: spectra ----------------
 fig, axes = plt.subplots(len(channels), 3, figsize=(13, 2.3 * len(channels)),
                          sharex=True, sharey="row")
 for i, ch in enumerate(short):
@@ -56,7 +46,6 @@ plt.tight_layout()
 plt.savefig(os.path.join(OUT_DIR, "spectra_channel_surface_car.png"), dpi=130)
 plt.show()
 
-# ---------------- plot 2: which channels work on an unseen car ----------------
 def band_features(ch_idx):
     """log band energy per channel: (windows, len(ch_idx) * 8)"""
     feats = []
