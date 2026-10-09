@@ -1,18 +1,3 @@
-"""
-Online replay for the random forest (same simulation as deploy.py Part B, for the forest).
-
-For each round, the final forest is rebuilt with the settings rf_model.py chose
-(rf_runs/chosen_settings.json, seed 0; same data, same steps, so it is the same model).
-Then each test-car recording is streamed:
-  raw samples in chunks of 10 (0.1 s at 100 Hz)
-  -> IIR high-pass per channel with sosfilt, filter state zi carried between chunks
-  -> 200-sample buffer -> every 1 s: scale -> 48/80 features -> forest -> class
-Scale modes:
-  "offline": per-recording scale from preprocessing (whole drive known)
-  "running": median window RMS of the drive so far, after a 30-window warm-up (what a chip can do)
-Smoothing: mean class probability of the current and previous 2 predictions (only past predictions, works online).
-Run AFTER rf_model.py. Separate cell is fine: everything it needs is defined here.
-"""
 import os
 import json
 import time
@@ -24,8 +9,8 @@ from scipy.stats import kurtosis
 from sklearn.ensemble import RandomForestClassifier, ExtraTreesClassifier
 from sklearn.metrics import f1_score, accuracy_score
 
-# ======================= settings (must match rf_model.py and preprocess_v2.py) =======================
-BASE = "data"                     # PVS folders and all outputs live here; run scripts from the repo root
+
+BASE = "data"                    
 DATA_FILE = os.path.join(BASE, "windows_v2.npz")
 RF_DIR = os.path.join(BASE, "rf_runs")
 OUT_DIR = os.path.join(RF_DIR, "online")
@@ -44,7 +29,6 @@ MODELS = {"rf": RandomForestClassifier, "extra_trees": ExtraTreesClassifier}
 os.makedirs(OUT_DIR, exist_ok=True)
 
 
-# ======================= same feature extraction as rf_model.py =======================
 def extract_features(X):
     short = [c.replace("_below_suspension", "") for c in CHANNELS]
     rms = np.sqrt((X ** 2).mean(axis=2))
@@ -99,7 +83,7 @@ def rebuild_models():
     return models, d
 
 
-# ======================= streaming =======================
+
 def folder_for(n):
     for name in os.listdir(BASE):
         if name.replace(" ", "") == f"PVS{n}":
@@ -123,14 +107,14 @@ def replay(n, model, cols, scale_offline, mode):
     buf = np.zeros((C, WIN))
     seen, rms_history, out, recent = 0, [], [], []
 
-    for start in range(0, N - CHUNK + 1, CHUNK):          # every 0.1 s
+    for start in range(0, N - CHUNK + 1, CHUNK):          
         chunk = raw[:, start:start + CHUNK]
         filt = np.empty_like(chunk)
         for c in range(C):
             filt[c], zi[c] = sosfilt(SOS, chunk[c], zi=zi[c])
         buf = np.concatenate([buf[:, CHUNK:], filt], axis=1)
         seen += CHUNK
-        if seen < WIN or (seen - WIN) % STEP != 0:         # predict once per second
+        if seen < WIN or (seen - WIN) % STEP != 0:         
             continue
 
         w0 = seen - WIN
@@ -152,7 +136,7 @@ def replay(n, model, cols, scale_offline, mode):
         F1, _, _ = extract_features((buf / scale[:, None])[None])
         proba = model.predict_proba(F1[:, cols])[0]
         ms = (time.perf_counter() - t0) * 1000
-        recent = (recent + [proba])[-SMOOTH:]               # online: current + previous 2
+        recent = (recent + [proba])[-SMOOTH:]               
         out.append({"recording": n, "t_s": seen / FS, "moving": moving, "label": label,
                     "pred": int(proba.argmax()), "pred_smooth3": int(np.mean(recent, axis=0).argmax()),
                     "latency_ms": ms})
@@ -177,7 +161,7 @@ def main():
                 print(f"PVS {n} | {mode:<7} scale | {len(df)} predictions")
             df = pd.concat(dfs)
             timelines.append(df)
-            scored = df[df["moving"] & (df["label"] >= 0)]          # same windows as offline evaluation
+            scored = df[df["moving"] & (df["label"] >= 0)]          
             for col, smooth in [("pred", "none"), ("pred_smooth3", "smooth 3")]:
                 rows.append({"test_car": test_car, "scale": mode, "smoothing": smooth,
                              "scored_windows": len(scored),
