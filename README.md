@@ -76,7 +76,8 @@ The final inputs are the channels whose patterns are the same across cars: **acc
 
 32,195 parameters, dropout 0.2, Adam (learning rate 0.001), early stopping on validation loss. Kept small on purpose to fit on a chip.
 
-![CNN confusion matrices](figures/fig3_cnn_confusion.png)
+<img width="2381" height="801" alt="fig3_cnn_confusion" src="https://github.com/user-attachments/assets/7afc2790-f7ff-4b12-901e-9f341b0187bb" />
+
 
 <img width="600" height="400" alt="fig10_cnn_loss_curve" src="https://github.com/user-attachments/assets/4b493577-6584-4651-92ed-4b7afbcbd833" />
 
