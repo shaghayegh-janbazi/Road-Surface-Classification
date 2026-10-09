@@ -175,19 +175,6 @@ int8 makes the model 2.8× smaller with no loss in accuracy.
 - The online replay exposed a training/deployment mismatch (normalization from the whole drive) that offline testing could not show
 - A small feature-based model can match a CNN at a fraction of the computation, so it is worth testing before choosing a deep model
 
-## 11. How to run
-
-```bash
-pip install -r requirements.txt
-python src/preprocess_v2.py      # filtered windows -> windows_v2.npz
-python src/explore_channels.py   # spectra and channel ranking
-python src/cnn_v2.py             # CNN, leave-one-car-out, 3 seeds
-python src/evaluate_runs.py      # full metrics report
-python src/deploy.py             # ONNX, int8, online replay
-python src/rf_model.py           # random forest
-python src/rf_online.py          # random forest online replay
-python src/make_figures.py       # figures and tables
-```
 
 ## Citation
 
