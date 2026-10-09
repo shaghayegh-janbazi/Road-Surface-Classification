@@ -1,23 +1,3 @@
-"""
-Deployment step for the final CNN (run G: acc x/y/z + gyro_z, below suspension).
-
-Part A: ONNX + int8, for each leave-one-car-out model (seed 0)
-  1. export PyTorch -> ONNX (FP32), check outputs match PyTorch
-  2. static int8 quantization; calibration windows from the TRAINING cars only
-  3. compare PyTorch FP32 / ONNX FP32 / ONNX int8: macro F1 on the test car, file size, latency
-
-Part B: online replay, simulating the chip
-  Raw CSV samples arrive in chunks of 10 (= every 0.1 s at 100 Hz):
-    IIR high-pass per channel with sosfilt, filter state zi carried between chunks
-    -> 200-sample ring buffer -> every 1 s: scale, normalize, int8 ONNX model -> class
-  Two scale modes:
-    "offline": per-recording scale from preprocessing (whole drive known) -> must match offline
-    "running": median window RMS of the drive SO FAR (what a real chip can do)
-  Also: check the chunked filter equals the offline filter, latency per prediction,
-        and a 3-prediction majority vote.
-
-Needs: pip install onnx onnxruntime
-"""
 import os
 import time
 import numpy as np
@@ -35,27 +15,27 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-# ======================= settings =======================
-BASE = "data"                     # PVS folders and all outputs live here; run scripts from the repo root
+
+BASE = "data"                    
 DATA_FILE = os.path.join(BASE, "windows_v2.npz")
 RUN_DIR = os.path.join(BASE, "cnn_runs", "acc_x+acc_y+acc_z+gyro_z__noaug")
 OUT_DIR = os.path.join(BASE, "deploy")
 SEED = 0
 CARS = [1, 2, 3]
 NAMES = ["dirt", "cobblestone", "asphalt"]
-N_CALIB = 500                  # calibration windows for int8 (training cars only)
-N_LATENCY = 500                # windows timed one by one
+N_CALIB = 500                  
+N_LATENCY = 500               
 
-FS, WIN, STEP, CHUNK = 100, 200, 100, 10      # chunk of 10 samples = 0.1 s
+FS, WIN, STEP, CHUNK = 100, 200, 100, 10     
 MIN_SPEED = 1.0
-WARMUP_WINDOWS = 30            # running scale: wait for 30 moving windows (~30 s) before predicting
+WARMUP_WINDOWS = 30            
 SURFACES = ["dirt_road", "cobblestone_road", "asphalt_road"]
 SOS = butter(2, 0.5, btype="highpass", fs=FS, output="sos")
 
 os.makedirs(OUT_DIR, exist_ok=True)
 
 
-# ======================= model (same as cnn_v2.py) =======================
+
 class SurfaceCNN(nn.Module):
     def __init__(self, in_channels, n_classes=3):
         super().__init__()
@@ -94,7 +74,7 @@ def kb(path):
 def latency_ms(sess, X):
     """Mean and 95th percentile time for ONE window (batch of 1), single thread."""
     name = sess.get_inputs()[0].name
-    for i in range(20):                                   # warm-up
+    for i in range(20):                                 
         sess.run(None, {name: X[i:i + 1]})
     t = []
     for i in range(min(N_LATENCY, len(X))):
@@ -120,11 +100,11 @@ class CalibReader(CalibrationDataReader):
 
 def session(path):
     opts = ort.SessionOptions()
-    opts.intra_op_num_threads = 1                         # closer to a single small core
+    opts.intra_op_num_threads = 1                     
     return ort.InferenceSession(path, opts, providers=["CPUExecutionProvider"])
 
 
-# ======================= Part A: ONNX + int8 =======================
+
 def part_a():
     d = np.load(DATA_FILE)
     names_all = [str(c) for c in d["channels"]]
@@ -148,7 +128,7 @@ def part_a():
                   dynamic_axes={"x": {0: "batch"}, "scores": {0: "batch"}})
         try:
             torch.onnx.export(model, dummy, fp32, dynamo=False, **kw)
-        except TypeError:                                  # older PyTorch has no 'dynamo' argument
+        except TypeError:                                  
             torch.onnx.export(model, dummy, fp32, **kw)
         onnx.checker.check_model(onnx.load(fp32))
 
@@ -159,7 +139,7 @@ def part_a():
         onnx_scores = s_fp32.run(None, {"x": Xte})[0]
         max_diff = float(np.abs(pt_scores - onnx_scores).max())
 
-        # 3. int8 static quantization, calibration on training cars only
+        
         quant_pre_process(fp32, pre)
         rng = np.random.default_rng(0)
         Xtr = normalize(X[car != test_car], mean, std)
@@ -168,7 +148,7 @@ def part_a():
                         per_channel=True, weight_type=QuantType.QInt8, activation_type=QuantType.QInt8)
         s_int8 = session(int8)
 
-        # 4. compare
+      
         pred = {"pytorch_fp32": pt_scores.argmax(1), "onnx_fp32": onnx_scores.argmax(1),
                 "onnx_int8": onnx_predict(s_int8, Xte)}
         pt_path = os.path.join(RUN_DIR, f"cnn_seed{SEED}_test{test_car}.pt")
@@ -199,7 +179,7 @@ def part_a():
     return models
 
 
-# ======================= Part B: online replay =======================
+
 def folder_for(n):
     for name in os.listdir(BASE):
         if name.replace(" ", "") == f"PVS{n}":
@@ -222,14 +202,14 @@ def replay(n, int8_path, mean, std, channels, scale_offline, mode):
     C, N = raw.shape
     sess = session(int8_path)
 
-    # offline reference filter (only for the equivalence check)
+    
     ref = np.stack([sosfilt(SOS, raw[c], zi=sosfilt_zi(SOS) * raw[c, 0])[0] for c in range(C)])
 
-    zi = [sosfilt_zi(SOS) * raw[c, 0] for c in range(C)]     # filter state, one per channel
-    buf = np.zeros((C, WIN))                                 # ring buffer (newest at the end)
+    zi = [sosfilt_zi(SOS) * raw[c, 0] for c in range(C)]    
+    buf = np.zeros((C, WIN))                                 
     seen, rms_history, out, max_filter_diff = 0, [], [], 0.0
 
-    for start in range(0, N - CHUNK + 1, CHUNK):            # one loop = 0.1 s of data arriving
+    for start in range(0, N - CHUNK + 1, CHUNK):            
         chunk = raw[:, start:start + CHUNK]
         filt = np.empty_like(chunk)
         for c in range(C):
@@ -237,7 +217,7 @@ def replay(n, int8_path, mean, std, channels, scale_offline, mode):
         buf = np.concatenate([buf[:, CHUNK:], filt], axis=1)
         seen += CHUNK
 
-        if seen < WIN or (seen - WIN) % STEP != 0:           # predict once per second
+        if seen < WIN or (seen - WIN) % STEP != 0:          
             continue
         w0 = seen - WIN
         max_filter_diff = max(max_filter_diff, float(np.abs(buf - ref[:, w0:seen]).max()))
@@ -250,7 +230,7 @@ def replay(n, int8_path, mean, std, channels, scale_offline, mode):
 
         if mode == "offline":
             scale = scale_offline
-        else:                                                # running median of moving windows so far
+        else:                                                
             if moving:
                 rms_history.append(np.sqrt((buf ** 2).mean(axis=1)))
             if len(rms_history) < WARMUP_WINDOWS:
@@ -265,7 +245,7 @@ def replay(n, int8_path, mean, std, channels, scale_offline, mode):
                     "pred": pred, "latency_ms": ms})
 
     df = pd.DataFrame(out)
-    # majority vote over the last 3 predictions (only past and present, works online)
+    
     df["pred_vote3"] = (df["pred"].rolling(3, min_periods=1)
                         .apply(lambda v: np.bincount(v.astype(int), minlength=3).argmax(), raw=True)
                         .astype(int))
@@ -313,7 +293,7 @@ def part_b(models):
           f"(budget: 1000 ms between predictions)")
     print(f"chunked filter equals offline filter: max diff {res['filter_max_diff'].max():.1e}")
 
-    # timeline figure: first recording of each test car, running scale
+    
     fig, axes = plt.subplots(3, 1, figsize=(14, 8), sharey=True)
     for ax, test_car in zip(axes, CARS):
         n = 3 * (test_car - 1) + 1
