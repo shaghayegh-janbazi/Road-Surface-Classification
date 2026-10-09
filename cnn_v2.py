@@ -1,15 +1,3 @@
-"""
-Road surface classification (dirt / cobblestone / asphalt) with a small 1D CNN, v2.
-Leave-one-car-out evaluation, 3 rounds x N seeds.
-
-Input : windows_v2.npz from preprocess_v2.py, X (n, 7 channels, 200), per-recording normalized
-Train : optional augmentations (training only, never validation/test):
-          - STRETCH: random time-stretch -> shifts all frequencies, like a car whose suspension
-                     resonance is a few Hz higher or lower (Car 3 peaks ~17 Hz vs ~12 Hz)
-          - AMPLITUDE: random gain per window (hurt in run B, off by default)
-          - AXIS_FLIP: random sign per axis channel (sensor mounted the other way)
-Output: one folder per run, named from the settings, so runs never overwrite each other.
-"""
 import os
 import json
 import numpy as np
@@ -22,23 +10,23 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-# ======================= settings =======================
-BASE = "data"                     # PVS folders and all outputs live here; run scripts from the repo root
+
+BASE = "data"                   
 DATA_FILE = os.path.join(BASE, "windows_v2.npz")
 
 ACC3 = ["acc_x_below_suspension", "acc_y_below_suspension", "acc_z_below_suspension"]
 GYRO_Z = ["gyro_z_below_suspension"]
 
-# defaults; the RUNS list at the bottom overrides them per run
-USE_CHANNELS = ACC3 + GYRO_Z     # "all" or a list of channel names
-AMPLITUDE = False                # random gain per window
+
+USE_CHANNELS = ACC3 + GYRO_Z    
+AMPLITUDE = False               
 SCALE_RANGE = (0.6, 1.6)
-STRETCH = False                  # random time-stretch (frequency shift)
-STRETCH_RANGE = (0.8, 1.25)      # >1 stretches (lower frequencies), <1 compresses (higher)
+STRETCH = False                  
+STRETCH_RANGE = (0.8, 1.25)      
 AXIS_FLIP = False
 
 CARS = [1, 2, 3]
-SEEDS = [0, 1, 2]                # final run: 3 seeds
+SEEDS = [0, 1, 2]                
 N_CLASSES = 3
 NAMES = ["dirt", "cobblestone", "asphalt"]
 
@@ -61,7 +49,6 @@ def run_name():
     return f"{ch}__{'-'.join(aug) if aug else 'noaug'}"
 
 
-# ======================= model =======================
 class SurfaceCNN(nn.Module):
     """3 conv blocks + global average pooling. in_channels = number of sensor channels."""
 
@@ -78,18 +65,18 @@ class SurfaceCNN(nn.Module):
             )
 
         self.features = nn.Sequential(
-            block(in_channels, 32, 5),   # (C, 200)  -> (32, 100)
-            block(32, 64, 3),            # (32, 100) -> (64, 50)
-            block(64, 128, 3),           # (64, 50)  -> (128, 25)
+            block(in_channels, 32, 5),   # (C, 200)  to (32, 100)
+            block(32, 64, 3),            # (32, 100) to (64, 50)
+            block(64, 128, 3),           # (64, 50)  to (128, 25)
         )
         self.pool = nn.AdaptiveAvgPool1d(1)
         self.head = nn.Linear(128, n_classes)
 
-    def forward(self, x):                # x: (batch, C, 200)
+    def forward(self, x):               
         return self.head(self.pool(self.features(x)).squeeze(-1))
 
 
-# ======================= data =======================
+
 def load_data(path):
     d = np.load(path)
     X, y, car = d["X"].astype(np.float32), d["y"].astype(np.int64), d["car"].astype(np.int64)
@@ -126,7 +113,7 @@ def batches(X, y, size, shuffle):
         yield X[j], y[j]
 
 
-# ======================= augmentation (training only) =======================
+
 def time_stretch(xb):
     """Shift all frequencies by one random factor per batch.
     The window is extended with its mirror image (continuous at the joint), resampled,
@@ -155,7 +142,6 @@ def augment(xb, axis_idx):
     return xb
 
 
-# ======================= training =======================
 def set_seed(seed):
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -228,7 +214,7 @@ def save_loss_plot(hist, best_epoch, title, path):
     plt.tight_layout(); plt.savefig(path); plt.close()
 
 
-# ======================= one run =======================
+
 def main():
     out_dir = os.path.join(BASE, "cnn_runs", run_name())
     os.makedirs(out_dir, exist_ok=True)
@@ -246,7 +232,7 @@ def main():
         for test_car in CARS:
             a, b = [c for c in CARS if c != test_car]
 
-            # 1. validation inside the training cars, both directions -> number of epochs
+
             best = []
             for tr_c, va_c in [(a, b), (b, a)]:
                 _, _, _, ep, hist = fit(X[car == tr_c], y[car == tr_c], seed, axis_idx,
@@ -256,11 +242,11 @@ def main():
                 save_loss_plot(hist, ep, tag, os.path.join(out_dir, f"loss_{tag}.png"))
             n_epochs = max(1, round(np.mean(best)))
 
-            # 2. final model on both training cars, fixed epochs
+            
             tr = car != test_car
             model, mean, std, _, _ = fit(X[tr], y[tr], seed, axis_idx, n_epochs=n_epochs)
 
-            # 3. test once on the left-out car
+           
             te = car == test_car
             Xte, yte = to_tensors(X[te], y[te], mean, std)
             _, y_pred = evaluate(model, Xte, yte, loss_fn)
@@ -288,10 +274,9 @@ def main():
     return res
 
 
-# ======================= runs =======================
-# each entry: (channels, stretch, amplitude). Edit this list to choose what runs.
+
 RUNS = [
-    (ACC3 + GYRO_Z, False, False),     # G: final setup (acc xyz + gyro_z, no augmentation), 3 seeds
+    (ACC3 + GYRO_Z, False, False),     
 ]
 
 if __name__ == "__main__":
