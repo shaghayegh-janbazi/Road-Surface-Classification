@@ -1,23 +1,3 @@
-"""
-Random forest baseline for road surface classification, sized for a chip.
-Same windows, same 4 channels (acc x/y/z + gyro_z) and same leave-one-car-out rounds as the CNN.
-
-1. Feature extraction (per window, per channel)
-     time:      RMS, peak-to-peak, kurtosis, crest factor
-     frequency: 8 log band energies (Welch)                       -> "base" set, 12 per channel
-     extra:     8 relative band energies (band / total, log)      -> "base+relative" set, 20 per channel
-2. Tuning INSIDE the training cars only (train on one, validate on the other, both ways):
-     a. model type (random forest / extra trees), number of trees, depth, feature set
-        -> keep the SMALLEST model within 0.01 macro F1 of the best (chip-friendly)
-     b. feature selection: keep the top-K most important features, K chosen the same way
-3. Final model per round: train on both training cars, test once on the left-out car, 3 seeds
-4. Post-learning smoothing (online): average class probabilities of the current and
-     previous 2 windows of the same recording -> reported separately, never tuned on test
-5. Chip numbers: tree nodes, estimated memory, comparisons per prediction, latency on this PC
-
-Output: rf_runs/rf_raw and rf_runs/rf_smooth3 (same file format as cnn_runs, so
-evaluate_runs.py works with RUNS_DIR = rf_runs), plus chosen settings and importance plots.
-"""
 import os
 import json
 import time
@@ -31,44 +11,43 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-# ======================= settings =======================
-BASE = "data"                     # PVS folders and all outputs live here; run scripts from the repo root
-DATA_FILE = os.path.join(BASE, "windows_v2.npz")          # same data as the final CNN
+
+BASE = "data"                   
+DATA_FILE = os.path.join(BASE, "windows_v2.npz")          # same data for the CNN model
 OUT_ROOT = os.path.join(BASE, "rf_runs")
 CHANNELS = ["acc_x_below_suspension", "acc_y_below_suspension",
             "acc_z_below_suspension", "gyro_z_below_suspension"]
 FS = 100
-BANDS = [0.5, 2, 4, 8, 12, 16, 24, 32, 50]                 # Hz edges -> 8 bands
+BANDS = [0.5, 2, 4, 8, 12, 16, 24, 32, 50]                
 CARS = [1, 2, 3]
 SEEDS = [0, 1, 2]
 NAMES = ["dirt", "cobblestone", "asphalt"]
-SMOOTH = 3                                                 # windows averaged for smoothing (fixed, not tuned)
-TOLERANCE = 0.01                                           # "as good as the best" margin for picking small models
-BYTES_PER_NODE = 10        # feature id 1 B + threshold 4 B + two child indices 2x2 B + class 1 B
+SMOOTH = 3                                                
+TOLERANCE = 0.01                                       
+BYTES_PER_NODE = 10       
 
-# search space (kept small on purpose: every value is a model size you could put on a chip)
+
 MODELS = {"rf": RandomForestClassifier, "extra_trees": ExtraTreesClassifier}
 N_TREES = [25, 50, 100]
 DEPTHS = [6, 10, 14]
 MIN_LEAF = 5
-TOP_K = [8, 16, 32, None]                                  # None = keep all features of the chosen set
+TOP_K = [8, 16, 32, None]                                  
 
 
-# ======================= 1. feature extraction =======================
+
 def extract_features(X):
     """X (n, channels, 200) -> F (n, features), feature names, and the column groups."""
     short = [c.replace("_below_suspension", "") for c in CHANNELS]
     rms = np.sqrt((X ** 2).mean(axis=2))
     p2p = X.max(axis=2) - X.min(axis=2)
-    kurt = kurtosis(X, axis=2)                               # 0 for Gaussian noise, high for sharp hits
+    kurt = kurtosis(X, axis=2)                               
     crest = np.abs(X).max(axis=2) / (rms + 1e-12)
-    freqs, psd = welch(X, fs=FS, nperseg=64, axis=-1)        # (n, channels, 33)
-
+    freqs, psd = welch(X, fs=FS, nperseg=64, axis=-1)       
     band = np.stack([psd[:, :, (freqs >= lo) & (freqs < hi)].sum(axis=2)
-                     for lo, hi in zip(BANDS[:-1], BANDS[1:])], axis=2)   # (n, channels, 8)
+                     for lo, hi in zip(BANDS[:-1], BANDS[1:])], axis=2)   
     total = band.sum(axis=2, keepdims=True)
     log_band = np.log10(band + 1e-12)
-    rel_band = np.log10(band / (total + 1e-12) + 1e-12)      # share of energy: less car-dependent
+    rel_band = np.log10(band / (total + 1e-12) + 1e-12)      
 
     cols, names, base_idx, rel_idx = [], [], [], []
     for c, ch in enumerate(short):
@@ -83,7 +62,7 @@ def extract_features(X):
     return F, names, sets
 
 
-# ======================= helpers =======================
+
 def make_model(kind, n_trees, depth, seed):
     return MODELS[kind](n_estimators=n_trees, max_depth=depth, min_samples_leaf=MIN_LEAF,
                         n_jobs=-1, random_state=seed)
@@ -126,7 +105,7 @@ def smooth_proba(proba, rec):
     """Online smoothing: mean of the current and previous SMOOTH-1 windows of the same recording."""
     out = np.empty_like(proba)
     for r in np.unique(rec):
-        idx = np.where(rec == r)[0]                          # windows are stored in time order
+        idx = np.where(rec == r)[0]                         
         p = proba[idx]
         csum = np.cumsum(np.vstack([np.zeros((1, p.shape[1])), p]), axis=0)
         n = np.arange(1, len(p) + 1)
@@ -150,7 +129,6 @@ def latency_ms(model, cols, X_one_window_batch):
     return float(np.mean(t))
 
 
-# ======================= main =======================
 def main():
     d = np.load(DATA_FILE)
     names_all = [str(c) for c in d["channels"]]
@@ -174,7 +152,7 @@ def main():
         a, b = [c for c in CARS if c != test_car]
         tr_mask = car != test_car
 
-        # ---- 2a. model type, size and feature set: validation inside the training cars ----
+   
         grid = []
         for set_name, cols in sets.items():
             for kind in MODELS:
@@ -189,7 +167,7 @@ def main():
                "trees": int(best["trees"]), "depth": int(best["depth"])}
         cols_all = sets[cfg["features"]]
 
-        # ---- 2b. feature selection (top-K by importance), also inside the training cars ----
+      
         ksel = []
         for k in TOP_K:
             scores = []
@@ -204,21 +182,21 @@ def main():
         chosen[f"test_car_{test_car}"] = cfg
         print(f"test car {test_car} | chosen on training cars {a},{b}: {cfg}")
 
-        # ---- 3. final model on both training cars, 3 seeds, tested once ----
+       
         for seed in SEEDS:
             cols = top_k_columns(F, y, tr_mask, cols_all, cfg, cfg["top_k"], seed)
             model = make_model(cfg["model"], cfg["trees"], cfg["depth"], seed).fit(F[tr_mask][:, cols], y[tr_mask])
             te = car == test_car
             proba = model.predict_proba(F[te][:, cols])
             preds = {"rf_raw": proba.argmax(1),
-                     "rf_smooth3": smooth_proba(proba, rec[te]).argmax(1)}       # 4. smoothing
+                     "rf_smooth3": smooth_proba(proba, rec[te]).argmax(1)}      
             for k, p in preds.items():
                 rows[k].append({"run": k, "seed": seed, "test_car": test_car,
                                 "macro_f1": f1_score(y[te], p, average="macro"),
                                 "accuracy": accuracy_score(y[te], p)})
                 cms[k][f"seed{seed}_test{test_car}"] = confusion_matrix(y[te], p, labels=[0, 1, 2]).tolist()
 
-            # ---- 5. chip numbers ----
+           
             nodes = n_nodes(model)
             size_rows.append({"test_car": test_car, "seed": seed, "features": len(cols),
                               "trees": cfg["trees"], "max_depth": cfg["depth"], "nodes": nodes,
@@ -228,7 +206,7 @@ def main():
             if seed == 0:
                 importances.append(pd.Series(model.feature_importances_, index=[feat_names[i] for i in cols]))
 
-    # ---- save in the same format as cnn_runs ----
+    
     for k, p in dirs.items():
         res = pd.DataFrame(rows[k])
         res.to_csv(os.path.join(p, "results.csv"), index=False)
@@ -239,7 +217,7 @@ def main():
     sizes = pd.DataFrame(size_rows)
     sizes.to_csv(os.path.join(OUT_ROOT, "model_size.csv"), index=False)
 
-    # ---- report ----
+   
     print("\nRESULTS (macro F1, mean over seeds)")
     for k in dirs:
         res = pd.DataFrame(rows[k])
