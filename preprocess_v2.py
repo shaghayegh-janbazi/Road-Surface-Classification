@@ -1,15 +1,3 @@
-"""
-Preprocessing v2: multi-channel windows + per-recording normalization.
-
-Per recording (PVS 1..9):
-  1. read only the needed columns (sensor + speed, surface labels), check row counts
-  2. 7 channels: magnitude, acc x/y/z, gyro x/y/z (below suspension)
-  3. each channel: Butterworth high-pass 0.5 Hz, order 2, sosfilt (works online)
-  4. cut windows (200 samples, step 100)
-  5. per-recording scale: median RMS of moving windows, per channel (no labels used)
-  6. keep windows that are moving (mean speed >= 1 m/s) and contain one surface only
-Output: windows_v2.npz (v1 file is not overwritten)
-"""
 import os
 import re
 import warnings
@@ -18,24 +6,24 @@ import pandas as pd
 from numpy.lib.stride_tricks import sliding_window_view
 from scipy.signal import butter, sosfilt, sosfilt_zi
 
-# ======================= settings =======================
-BASE = "data"                     # PVS folders and all outputs live here; run scripts from the repo root
+
+BASE = "data"                    
 OUT_FILE = os.path.join(BASE, "windows_v2.npz")
 RECORDINGS = [1, 2, 3, 4, 5, 6, 7, 8, 9]
 FS = 100
 WIN = 200
 STEP = 100
-MIN_SPEED = 1.0                      # m/s
-NORMALIZE_PER_RECORDING = True       # fix 1: set False to compare without it
+MIN_SPEED = 1.0                     
+NORMALIZE_PER_RECORDING = True      
 POS = "below_suspension"
-SURFACES = ["dirt_road", "cobblestone_road", "asphalt_road"]   # -> 0, 1, 2
+SURFACES = ["dirt_road", "cobblestone_road", "asphalt_road"]   
 ACC = [f"acc_{a}_{POS}" for a in "xyz"]
 GYRO = [f"gyro_{a}_{POS}" for a in "xyz"]
-CHANNELS = ["mag"] + ACC + GYRO      # 7 channels, order matters
+CHANNELS = ["mag"] + ACC + GYRO     
 SOS = butter(2, 0.5, btype="highpass", fs=FS, output="sos")
 
 
-# ======================= functions =======================
+
 def find_folders(base, wanted):
     """Map PVS number -> folder path, for folders named 'PVS 1' or 'PVS1'."""
     folders = {}
@@ -61,7 +49,7 @@ def load_recording(path, n):
         raise ValueError(f"PVS {n}: {np.isnan(raw).sum()} NaN values in sensor columns")
 
     onehot = labels[SURFACES].to_numpy()
-    surface = np.where(onehot.sum(axis=1) == 1, onehot.argmax(axis=1), -1)   # -1 = none or several
+    surface = np.where(onehot.sum(axis=1) == 1, onehot.argmax(axis=1), -1)   
     speed = data["speed"].to_numpy(dtype=np.float64)
     return raw, speed, surface
 
@@ -76,14 +64,14 @@ def make_windows(sig, speed, surface):
     """sig (channels, samples) -> windows (n, channels, WIN), mean speed (n,), labels (n, WIN)."""
     starts = np.arange(0, sig.shape[1] - WIN + 1, STEP)
     win = sliding_window_view(sig, WIN, axis=1)[:, starts, :].transpose(1, 0, 2)
-    with warnings.catch_warnings():                       # windows with no GPS value give NaN speed
+    with warnings.catch_warnings():                       
         warnings.simplefilter("ignore", category=RuntimeWarning)
         spd = np.nanmean(sliding_window_view(speed, WIN)[starts], axis=1)
     sur = sliding_window_view(surface, WIN)[starts]
     return win, spd, sur
 
 
-# ======================= main =======================
+
 def main():
     folders = find_folders(BASE, RECORDINGS)
     X, y, cars, recs, speeds, scales = [], [], [], [], [], []
@@ -97,9 +85,9 @@ def main():
         moving = spd >= MIN_SPEED                          # NaN speed -> False
         single = (sur[:, 0] != -1) & np.all(sur == sur[:, :1], axis=1)
 
-        # fix 1: per-recording, per-channel scale from moving windows (labels not used)
-        rms = np.sqrt((win[moving] ** 2).mean(axis=2))     # (n_moving, channels)
-        scale = np.maximum(np.median(rms, axis=0), 1e-6)   # avoid division by zero
+        
+        rms = np.sqrt((win[moving] ** 2).mean(axis=2))     
+        scale = np.maximum(np.median(rms, axis=0), 1e-6)   
         scales.append(scale)
         if NORMALIZE_PER_RECORDING:
             win = win / scale[None, :, None]
