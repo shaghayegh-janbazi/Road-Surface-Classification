@@ -1,23 +1,12 @@
-"""
-Full evaluation report for the CNN runs in cnn_runs/.
-  1. Comparison table of all runs (macro F1 per test car)
-  2. For one chosen run: per car and overall
-       accuracy, balanced accuracy, Cohen's kappa,
-       precision / recall / F1 / support per class, macro and weighted averages
-  3. Plots: confusion matrices (counts and % of true class), per-class metrics per car
-  4. Publication checklist (automatic checks + the manual ones still open)
-All metrics are computed from the saved confusion matrices (summed over seeds),
-so nothing is retrained.
-"""
 import os
 import json
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-BASE = "data"                     # PVS folders and all outputs live here; run scripts from the repo root
+BASE = "data"                     
 RUNS_DIR = os.path.join(BASE, "cnn_runs")
-RUN = "acc_x+acc_y+acc_z+gyro_z__noaug"      # the run to report in detail
+RUN = "acc_x+acc_y+acc_z+gyro_z__noaug"      
 NAMES = ["dirt", "cobblestone", "asphalt"]
 CARS = [1, 2, 3]
 CAR_NAMES = {1: "Car 1 (VW Saveiro)", 2: "Car 2 (Fiat Bravo)", 3: "Car 3 (Fiat Palio)"}
@@ -25,20 +14,20 @@ CHANCE = 1 / len(NAMES)
 pd.set_option("display.width", 140)
 
 
-# ======================= metrics from a confusion matrix =======================
+
 def metrics(cm):
     """cm[i, j] = windows of true class i predicted as class j."""
     cm = np.asarray(cm, dtype=float)
     tp = np.diag(cm)
-    support = cm.sum(axis=1)                 # true windows per class
-    predicted = cm.sum(axis=0)               # predicted windows per class
+    support = cm.sum(axis=1)                 
+    predicted = cm.sum(axis=0)               
     total = cm.sum()
     precision = np.divide(tp, predicted, out=np.zeros_like(tp), where=predicted > 0)
     recall = np.divide(tp, support, out=np.zeros_like(tp), where=support > 0)
     f1 = np.divide(2 * precision * recall, precision + recall,
                    out=np.zeros_like(tp), where=(precision + recall) > 0)
     accuracy = tp.sum() / total
-    expected = (support * predicted).sum() / total ** 2          # agreement by chance
+    expected = (support * predicted).sum() / total ** 2          
     kappa = (accuracy - expected) / (1 - expected)
     w = support / total
     return {
@@ -66,7 +55,7 @@ def cm_for_car(cms, car):
     return np.sum([np.array(cms[k]) for k in keys], axis=0)
 
 
-# ======================= 1. compare all runs =======================
+
 print("=" * 78)
 print("1. ALL RUNS: macro F1 per test car (mean over seeds)")
 print("=" * 78)
@@ -82,7 +71,7 @@ for run in sorted(os.listdir(RUNS_DIR)):
                  "seeds": r["seed"].nunique()})
 print(pd.DataFrame(rows).set_index("run").round(3).to_string())
 
-# ======================= 2. detailed report for one run =======================
+
 res, cms = load_run(RUN)
 print("\n" + "=" * 78)
 print(f"2. DETAILED REPORT: {RUN}   (seeds: {sorted(int(s) for s in res['seed'].unique())})")
@@ -112,7 +101,7 @@ print(summary.to_string())
 out_dir = os.path.join(RUNS_DIR, RUN)
 summary.to_csv(os.path.join(out_dir, "report_summary.csv"))
 
-# ======================= 3. plots =======================
+
 fig, axes = plt.subplots(2, 4, figsize=(18, 8.5))
 for col, c in enumerate(CARS + ["all"]):
     cm, _ = per_car_metrics[c]
@@ -149,7 +138,7 @@ plt.tight_layout()
 plt.savefig(os.path.join(out_dir, "report_per_class.png"), dpi=130)
 plt.show()
 
-# ======================= 4. publication checklist =======================
+
 print("\n" + "=" * 78)
 print("4. PUBLICATION CHECKLIST")
 print("=" * 78)
